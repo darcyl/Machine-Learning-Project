@@ -1,0 +1,96 @@
+---
+title: "Machine Learning Project"
+author: "Darcy Lewis"
+date: "June 5, 2015"
+output: html_document
+---
+
+# Overview
+Objective of this analysis is to build a model which can predict the manner (A, B, C, D or E) in which the individuals performed bar bell lifts, given data recorded by accelerometers attached to the individuals.
+
+The variable "classe"" in the data set correctly documents the manner in which the lift was performed.
+
+Model Build Choices: 
+
+1. Pre-Processing & Predictor Elimination
+With 159 possible predictors, wanted to reduce the number of predictors to those most likely prior to attempting to find a model to predict the outcome.  The steps to identifing good predictors took the field from 159 down to 14.  
+ - used only numeric fields; 56 predictors remaining  
+ - removed those columns which were contextual such as datetime stamps and row numbers; 52 predictors remaining  
+ - removed near zero columns (after replacing NAs with 0, replacing missing values with zero and centering and scaling the data); 26 predictors remaining
+ - removed highly correlated predictors (>75%); 24 predictors remaining
+ - looked for predictors which were linear combinations of oneanother, but none were found  
+Note: centering and scaling was necessary as data valuess in various predictors ranged from fractions to values in the low hundreds  
+
+2. Selecting a Model
+ - linear regression was not an option as the outcome variable had 5 possible values  
+ - decision trees allow for more than two possible outcomes, but 40% accuracy just on the training data    
+ - random forest resulted in 100% accuracy on the training data and <5% out of sample error rate. 
+  
+##1 Setup Environment
+```{r}
+library(caret)
+library(ggplot2)
+library(rpart)
+```
+##2 Import Training Data
+```{r}
+setwd("C:/Users/Darcy/Documents/Coursera/Machine Learning")
+#fileUrl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+#download.file(fileUrl,destfile=".",method="curl")
+pml_data<-read.csv("pml-training.csv")
+```
+##3 Prepare for Cross Validation
+```{r}
+##Partition the training data into training and test (80/20 ratio) data sets 
+set.seed(1234)
+inTrain<-createDataPartition(y=pml_data$classe,p=0.8,list=FALSE)
+training<-pml_data[inTrain,]
+testing<-pml_data[-inTrain,]
+```
+##4 Pre-Processing & Predictor Elimination
+```{r}
+##create data frame of just the potential numeric predictors
+NumericPredictors <- sapply(training, is.numeric)
+trainingPredictors<-training[ , NumericPredictors]
+
+##Remove the 1st 4 columns containing contextual data
+trainingPredictors <- trainingPredictors[,5:56]    
+
+##replace NA values with 0
+trainingPredictors[is.na(trainingPredictors)]<-0
+
+##center and scale the data
+preProcValues <- preProcess(trainingPredictors, method = c("center", "scale"))
+trainingNorm <- predict(preProcValues, trainingPredictors)
+
+#remove near zero columns from the training dataset after replacing NA values with 0 to create dataframe of NonZero (NZ) predictors
+nzv <- nearZeroVar(trainingNorm)
+trainingNZ <- trainingNorm[, -nzv]
+
+##remove highly correlated predictors
+CorTrainingMatrix<-cor(trainingNZ)
+highlyCorPredictors <- findCorrelation(CorTrainingMatrix, cutoff = 3/4)
+trainingRelevant <- trainingNZ[,-highlyCorPredictors]
+
+##append outcome variable back into final dataset to be modeled, i.e. trainingClean
+classe<-training$classe
+trainingClean<-cbind(trainingRelevant,classe)
+```
+##Create an Accurate Predictive Model
+```{r}
+##After trying several models, random forest gave by far the best results
+modelFit<-train(classe~.,method="rf",data=trainingClean,prox=TRUE)
+confusionMatrix(trainingClean$classe,predict(modelFit,trainingClean))
+```
+##Pre-process and Apply the Model to Test Partition
+```{r}
+##preprocess testing data using training data
+testingPredictors<-subset(testing,select=colnames(trainingPredictors))
+testingPredictors[is.na(testingPredictors)]<-0
+testingNorm <- predict(preProcValues, testingPredictors)
+classe<-testing$classe
+testingNorm<-cbind(testingNorm,classe)
+testingClean<-subset(testingNorm,select=colnames(trainingClean))
+##apply the model to the testing partion
+confusionMatrix(testingClean$classe,predict(modelFit,testingClean))
+```
